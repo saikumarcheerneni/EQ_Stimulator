@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>EQ Distributed Simulator — PS vs Gossip</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Bebas+Neue&family=Outfit:wght@300;400;600;700;900&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#060810;--panel:#0c1120;--card:#111827;--border:#1a2a45;
+  --accent:#00e5ff;--green:#00ff9d;--orange:#ff7043;
+  --yellow:#ffc107;--purple:#b388ff;--red:#ff1744;
+  --gossip:#a78bfa;--gossip2:#7c3aed;
+  --text:#cdd6f4;--muted:#45556e;
+  --glow-b:rgba(0,229,255,0.15);--glow-g:rgba(0,255,157,0.15);
+  --glow-o:rgba(255,112,67,0.15);--glow-p:rgba(167,139,250,0.2);
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;overflow:hidden;}
+body{background:var(--bg);color:var(--text);font-family:'Outfit',sans-serif;display:flex;flex-direction:column;}
+body::before{content:'';position:fixed;inset:0;
+  background:radial-gradient(ellipse 80% 40% at 20% 10%,rgba(0,229,255,0.04) 0%,transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 80%,rgba(0,255,157,0.04) 0%,transparent 60%);
+  pointer-events:none;z-index:0;}
+
+header{position:relative;z-index:10;display:flex;align-items:center;justify-content:space-between;
+  padding:10px 20px;background:rgba(12,17,32,0.97);border-bottom:1px solid var(--border);
+  backdrop-filter:blur(10px);flex-shrink:0;}
+.logo{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:2px;
+  background:linear-gradient(90deg,var(--accent),var(--green));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.header-right{display:flex;align-items:center;gap:14px;}
+.status-chip{display:flex;align-items:center;gap:7px;background:var(--card);
+  border:1px solid var(--border);border-radius:20px;padding:4px 12px;
+  font-family:'JetBrains Mono',monospace;font-size:0.7rem;}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);}
+.dot.live{background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 1.2s infinite;}
+.dot.glive{background:var(--gossip);box-shadow:0 0 8px var(--gossip);animation:blink 1.2s infinite;}
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:0.3;}}
+.epoch-display{font-family:'JetBrains Mono',monospace;font-size:0.72rem;color:var(--accent);}
+
+.mode-tabs{position:relative;z-index:10;display:flex;align-items:center;
+  background:rgba(6,8,16,0.9);border-bottom:1px solid var(--border);flex-shrink:0;}
+.mode-tab{padding:10px 28px;border:none;background:none;
+  font-family:'JetBrains Mono',monospace;font-size:0.75rem;font-weight:700;
+  cursor:pointer;color:var(--muted);border-bottom:3px solid transparent;transition:all 0.2s;}
+.mode-tab:hover{color:var(--text);}
+.mode-tab.act-ps{color:var(--accent);border-bottom-color:var(--accent);}
+.mode-tab.act-gs{color:var(--gossip);border-bottom-color:var(--gossip);}
+.mode-badge{margin-left:6px;font-size:0.6rem;padding:1px 6px;border-radius:4px;}
+.badge-ps{background:rgba(0,229,255,0.12);color:var(--accent);}
+.badge-gs{background:rgba(167,139,250,0.12);color:var(--gossip);}
+.mode-desc{margin-left:auto;padding-right:20px;font-family:'JetBrains Mono',monospace;
+  font-size:0.63rem;color:var(--muted);}
+
+.controls{position:relative;z-index:10;display:flex;align-items:center;gap:10px;
+  padding:8px 20px;background:rgba(6,8,16,0.8);border-bottom:1px solid var(--border);
+  flex-shrink:0;flex-wrap:wrap;}
+.btn{padding:6px 18px;border-radius:8px;border:1px solid var(--border);
+  font-family:'JetBrains Mono',monospace;font-size:0.72rem;cursor:pointer;
+  transition:all 0.18s;background:var(--card);color:var(--text);}
+.btn:hover{border-color:var(--accent);color:var(--accent);}
+.btn.pps{background:linear-gradient(135deg,#0097a7,#00695c);border-color:var(--accent);
+  color:#fff;font-weight:700;box-shadow:0 0 16px rgba(0,229,255,0.2);}
+.btn.pgs{background:linear-gradient(135deg,#5b21b6,#7c3aed);border-color:var(--gossip);
+  color:#fff;font-weight:700;box-shadow:0 0 16px rgba(167,139,250,0.25);}
+.btn.danger{border-color:var(--red);color:var(--red);}
+.btn:disabled{opacity:0.35;cursor:not-allowed;}
+.speed-label{font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:var(--muted);}
+select.spd{background:var(--card);border:1px solid var(--border);color:var(--text);
+  padding:5px 10px;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:0.7rem;}
+
+.main{flex:1;display:grid;grid-template-columns:1fr 210px 230px;overflow:hidden;position:relative;z-index:1;}
+.canvas-wrap{position:relative;overflow:hidden;background:var(--panel);}
+#sim-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
+
+.sv-node{position:absolute;transform:translate(-50%,-50%);background:var(--card);
+  border:1px solid var(--border);border-radius:14px;padding:11px 13px;text-align:center;
+  min-width:105px;transition:all 0.3s;}
+.sv-node.active-node{border-color:var(--accent);box-shadow:0 0 20px var(--glow-b);}
+.sv-node.gact{border-color:var(--gossip);box-shadow:0 0 20px var(--glow-p);}
+.sv-node.ps-node.active-node{border-color:var(--orange);box-shadow:0 0 20px var(--glow-o);}
+.sv-node.worker-node.active-node{border-color:var(--green);box-shadow:0 0 16px var(--glow-g);}
+#node-w0.active-node,#node-w1.active-node{border-color:var(--green);box-shadow:0 0 16px var(--glow-g);}
+#node-ps.active-node{border-color:var(--orange);box-shadow:0 0 20px var(--glow-o);}
+.sv-icon{font-size:1.4rem;margin-bottom:3px;}
+.sv-title{font-weight:700;font-size:0.78rem;}
+.sv-sub{font-size:0.63rem;color:var(--muted);margin-top:2px;}
+.sv-tag{display:inline-block;margin-top:5px;padding:2px 7px;border-radius:4px;
+  font-family:'JetBrains Mono',monospace;font-size:0.58rem;font-weight:700;
+  background:rgba(255,255,255,0.06);color:var(--muted);}
+.sv-tag.g{color:var(--green);}.sv-tag.o{color:var(--orange);}.sv-tag.p{color:var(--gossip);}
+.sv-progress{height:3px;background:rgba(255,255,255,0.07);border-radius:2px;margin-top:6px;}
+.sv-pf{height:100%;width:0%;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--green));transition:width 0.4s;}
+.sv-metric{font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:var(--muted);margin-top:3px;}
+
+.packet{position:absolute;width:9px;height:9px;border-radius:50%;
+  transform:translate(-50%,-50%);pointer-events:none;z-index:20;}
+.packet.grad{background:var(--orange);box-shadow:0 0 6px var(--orange);}
+.packet.weight{background:var(--accent);box-shadow:0 0 6px var(--accent);}
+.packet.data{background:var(--green);box-shadow:0 0 6px var(--green);}
+.packet.gp{background:var(--gossip);box-shadow:0 0 8px var(--gossip);}
+
+.conn-line{stroke:var(--border);stroke-width:1.5;fill:none;stroke-dasharray:5 4;}
+.conn-gline{stroke:rgba(167,139,250,0.3);stroke-width:1.5;fill:none;stroke-dasharray:4 3;}
+
+/* no-ps badge */
+.no-ps-badge{position:absolute;top:10px;left:50%;transform:translateX(-50%);
+  background:rgba(124,58,237,0.12);border:1px solid rgba(167,139,250,0.25);
+  border-radius:8px;padding:5px 16px;font-family:'JetBrains Mono',monospace;
+  font-size:0.63rem;color:var(--gossip);white-space:nowrap;}
+
+/* compare overlay */
+.cmp-bar{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+  background:rgba(12,17,32,0.97);border:1px solid var(--border);
+  border-radius:10px;padding:8px 16px;display:none;gap:16px;align-items:center;
+  font-family:'JetBrains Mono',monospace;font-size:0.66rem;z-index:30;}
+.cmp-bar.show{display:flex;}
+.ci{display:flex;flex-direction:column;gap:2px;text-align:center;}
+.ci-lbl{color:var(--muted);font-size:0.58rem;}
+.ci-val{font-weight:700;}
+.ci-ps{color:var(--accent);}.ci-gs{color:var(--gossip);}
+.cdiv{width:1px;height:28px;background:var(--border);}
+
+/* metrics */
+.metrics-panel{background:rgba(11,15,28,0.95);border-left:1px solid var(--border);
+  overflow-y:auto;padding:12px 11px;display:flex;flex-direction:column;gap:9px;}
+.mpanel-title{font-family:'JetBrains Mono',monospace;font-size:0.63rem;color:var(--muted);letter-spacing:0.08em;}
+.metrics-grid{display:flex;flex-direction:column;gap:7px;}
+.metric-box{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:9px 11px;}
+.mb-label{font-family:'JetBrains Mono',monospace;font-size:0.56rem;color:var(--muted);
+  text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;}
+.mb-val{font-family:'JetBrains Mono',monospace;font-size:1rem;font-weight:700;}
+.mb-val.ac{color:var(--accent);}.mb-val.gr{color:var(--green);}.mb-val.yl{color:var(--yellow);}.mb-val.gv{color:var(--gossip);}
+.mb-bar{height:3px;background:rgba(255,255,255,0.06);border-radius:2px;margin-top:5px;}
+.mb-fill{height:100%;width:0%;border-radius:2px;transition:width 0.5s;}
+.chart-wrap{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 11px;}
+.chart-title{font-family:'JetBrains Mono',monospace;font-size:0.58rem;color:var(--muted);margin-bottom:5px;}
+canvas{display:block;width:100%;}
+
+/* log */
+.log-panel{background:rgba(6,8,16,0.98);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+.log-header{display:flex;align-items:center;gap:8px;padding:9px 13px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.log-title{font-family:'JetBrains Mono',monospace;font-size:0.66rem;color:var(--muted);letter-spacing:0.08em;flex:1;}
+.log-clear{background:none;border:1px solid var(--border);color:var(--muted);
+  font-family:'JetBrains Mono',monospace;font-size:0.58rem;padding:2px 8px;border-radius:4px;cursor:pointer;}
+#log-body{flex:1;overflow-y:auto;padding:5px 10px;font-family:'JetBrains Mono',monospace;font-size:0.63rem;}
+.log-line{padding:2px 0;border-bottom:1px solid rgba(26,42,69,0.4);display:flex;gap:5px;flex-wrap:wrap;}
+.ts{color:var(--muted);}
+.sm{color:var(--accent);}.sp{color:var(--orange);}.s0{color:var(--green);}.s1{color:var(--purple);}.s2{color:var(--yellow);}.sg{color:var(--gossip);}
+.log-line .msg{color:var(--text);}.log-line .val{color:var(--yellow);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🌍 EQ Distributed Simulator</div>
+  <div class="header-right">
+    <div class="status-chip"><div class="dot" id="sys-dot"></div><span id="sys-status">IDLE</span></div>
+    <div class="status-chip" id="mode-chip"><span id="mode-label" style="color:var(--accent)">PS MODE</span></div>
+    <div class="epoch-display">Epoch: <span id="hdr-epoch">0</span>/<span id="hdr-total">20</span></div>
+  </div>
+</header>
+
+<div class="mode-tabs">
+  <button class="mode-tab act-ps" id="tab-ps" onclick="switchMode('ps')">
+    ⚙️ PARAMETER SERVER <span class="mode-badge badge-ps">CENTRALIZED</span>
+  </button>
+  <button class="mode-tab" id="tab-gs" onclick="switchMode('gs')">
+    🔗 GOSSIP PROTOCOL <span class="mode-badge badge-gs">DECENTRALIZED</span>
+  </button>
+  <div class="mode-desc" id="mode-desc">PS coordinates all workers — single point of control</div>
+</div>
+
+<div class="controls">
+  <button class="btn pps" id="btn-start" onclick="startSim()">▶ RUN SIMULATION</button>
+  <button class="btn danger" id="btn-stop" onclick="stopSim()" disabled>■ STOP</button>
+  <button class="btn" id="btn-reset" onclick="resetSim()">↺ RESET</button>
+  <span class="speed-label">Speed:</span>
+  <select class="spd" id="speed-sel">
+    <option value="1200">Slow</option>
+    <option value="700" selected>Normal</option>
+    <option value="300">Fast</option>
+    <option value="80">Ultra</option>
+  </select>
+</div>
+
+<div class="main">
+  <div class="canvas-wrap" id="canvas-wrap">
+    <svg id="sim-svg"><g id="svg-lines"></g></svg>
+
+    <!-- PS VIEW -->
+    <div id="ps-view">
+      <div class="sv-node" id="node-cloud" style="left:15%;top:20%">
+        <div class="sv-icon">🗄️</div><div class="sv-title">Cloud Storage</div>
+        <div class="sv-sub">earthquake.csv</div><div class="sv-tag">797K rows</div>
+      </div>
+      <div class="sv-node" id="node-master" style="left:50%;top:20%">
+        <div class="sv-icon">🧠</div><div class="sv-title">Master</div>
+        <div class="sv-sub">Coordinator</div><div class="sv-tag" id="master-tag">IDLE</div>
+        <div class="sv-progress"><div class="sv-pf" id="master-prog"></div></div>
+      </div>
+      <div class="sv-node worker-node" id="node-w0" style="left:22%;top:72%">
+        <div class="sv-icon">⚙️</div><div class="sv-title">Worker 0</div>
+        <div class="sv-sub">shard_0.csv</div><div class="sv-tag g" id="w0-tag">WAITING</div>
+        <div class="sv-progress"><div class="sv-pf" id="w0-prog" style="background:linear-gradient(90deg,var(--green),#00c853)"></div></div>
+        <div class="sv-metric" id="w0-loss">loss: —</div>
+      </div>
+      <div class="sv-node worker-node" id="node-w1" style="left:78%;top:72%">
+        <div class="sv-icon">⚙️</div><div class="sv-title">Worker 1</div>
+        <div class="sv-sub">shard_1.csv</div><div class="sv-tag g" id="w1-tag">WAITING</div>
+        <div class="sv-progress"><div class="sv-pf" id="w1-prog" style="background:linear-gradient(90deg,var(--purple),var(--accent))"></div></div>
+        <div class="sv-metric" id="w1-loss">loss: —</div>
+      </div>
+      <div class="sv-node ps-node" id="node-ps" style="left:50%;top:72%">
+        <div class="sv-icon">🔄</div><div class="sv-title">Parameter Server</div>
+        <div class="sv-sub">:50051 TCP</div><div class="sv-tag o" id="ps-tag">OFFLINE</div>
+        <div class="sv-metric" id="ps-rounds">rounds: 0</div>
+      </div>
+    </div>
+
+    <!-- GOSSIP VIEW -->
+    <div id="gs-view" style="display:none">
+      <div class="no-ps-badge">✦ No Central Server — Workers gossip directly (peer-to-peer) ✦</div>
+      <div class="sv-node" id="gnode-w0" style="left:25%;top:32%">
+        <div class="sv-icon">🟣</div><div class="sv-title">Worker 0</div>
+        <div class="sv-sub">:60000 · shard_0</div><div class="sv-tag p" id="gw0-tag">IDLE</div>
+        <div class="sv-progress"><div class="sv-pf" id="gw0-prog" style="background:linear-gradient(90deg,var(--gossip),#c4b5fd)"></div></div>
+        <div class="sv-metric" id="gw0-loss">loss: —</div>
+        <div class="sv-metric" id="gw0-gc" style="color:var(--gossip)">gossips: 0</div>
+      </div>
+      <div class="sv-node" id="gnode-w1" style="left:75%;top:32%">
+        <div class="sv-icon">🟣</div><div class="sv-title">Worker 1</div>
+        <div class="sv-sub">:60001 · shard_1</div><div class="sv-tag p" id="gw1-tag">IDLE</div>
+        <div class="sv-progress"><div class="sv-pf" id="gw1-prog" style="background:linear-gradient(90deg,var(--gossip),#c4b5fd)"></div></div>
+        <div class="sv-metric" id="gw1-loss">loss: —</div>
+        <div class="sv-metric" id="gw1-gc" style="color:var(--gossip)">gossips: 0</div>
+      </div>
+      <div class="sv-node" id="gnode-w2" style="left:50%;top:74%">
+        <div class="sv-icon">🟣</div><div class="sv-title">Worker 2</div>
+        <div class="sv-sub">:60002 · shard_2</div><div class="sv-tag p" id="gw2-tag">IDLE</div>
+        <div class="sv-progress"><div class="sv-pf" id="gw2-prog" style="background:linear-gradient(90deg,var(--gossip),#c4b5fd)"></div></div>
+        <div class="sv-metric" id="gw2-loss">loss: —</div>
+        <div class="sv-metric" id="gw2-gc" style="color:var(--gossip)">gossips: 0</div>
+      </div>
+    </div>
+
+    <!-- Comparison bar -->
+    <div class="cmp-bar" id="cmp-bar">
+      <div class="ci"><div class="ci-lbl">PS RMSE</div><div class="ci-val ci-ps" id="cmp-ps-r">—</div></div>
+      <div class="cdiv"></div>
+      <div class="ci"><div class="ci-lbl">GOSSIP RMSE</div><div class="ci-val ci-gs" id="cmp-gs-r">—</div></div>
+      <div class="cdiv"></div>
+      <div class="ci"><div class="ci-lbl">PS TIME</div><div class="ci-val ci-ps" id="cmp-ps-t">—</div></div>
+      <div class="cdiv"></div>
+      <div class="ci"><div class="ci-lbl">GOSSIP TIME</div><div class="ci-val ci-gs" id="cmp-gs-t">—</div></div>
+      <div class="cdiv"></div>
+      <div class="ci"><div class="ci-lbl">WINNER</div><div class="ci-val" id="cmp-win">—</div></div>
+    </div>
+  </div>
+
+  <!-- Metrics -->
+  <div class="metrics-panel">
+    <div class="mpanel-title">// LIVE METRICS</div>
+    <div class="metrics-grid">
+      <div class="metric-box">
+        <div class="mb-label">CURRENT EPOCH</div>
+        <div class="mb-val ac" id="m-epoch">0 / 20</div>
+      </div>
+      <div class="metric-box">
+        <div class="mb-label">RMSE (lower=better)</div>
+        <div class="mb-val gr" id="m-rmse">—</div>
+        <div class="mb-bar"><div class="mb-fill" id="rmse-bar" style="background:var(--green)"></div></div>
+      </div>
+      <div class="metric-box">
+        <div class="mb-label">TRAINING LOSS</div>
+        <div class="mb-val yl" id="m-loss">—</div>
+        <div class="mb-bar"><div class="mb-fill" id="loss-bar" style="background:var(--yellow);width:100%"></div></div>
+      </div>
+      <div class="metric-box">
+        <div class="mb-label" id="lbl-exch">GRADIENTS SENT</div>
+        <div class="mb-val" id="m-exch" style="color:var(--orange)">0</div>
+      </div>
+      <div class="metric-box">
+        <div class="mb-label" id="lbl-extra">SPEEDUP vs SINGLE</div>
+        <div class="mb-val ac" id="m-extra">—</div>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title" id="chart-lbl">// LOSS CURVE</div>
+      <canvas id="lossChart" height="80"></canvas>
+    </div>
+    <div class="chart-wrap" id="cmp-chart-wrap" style="display:none">
+      <div class="chart-title">// PS vs GOSSIP</div>
+      <canvas id="cmpChart" height="70"></canvas>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="log-panel">
+    <div class="log-header">
+      <div class="dot" id="log-dot"></div>
+      <div class="log-title">SYSTEM LOG</div>
+      <button class="log-clear" onclick="clearLog()">CLEAR</button>
+    </div>
+    <div id="log-body"></div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────
+let mode='ps', epoch=0, running=false;
+let gradCount=0, gossipCount=0;
+let lossHist=[], gsLossHist=[];
+let w0L=2.8,w1L=2.8,gL=2.8;
+let gw0L=2.8,gw1L=2.8,gw2L=2.8,ggL=2.8;
+let psResult=null, gsResult=null, t0=0;
+const EPOCHS=20;
+const lc=document.getElementById('lossChart'),lx=lc.getContext('2d');
+const cc=document.getElementById('cmpChart'),cx=cc.getContext('2d');
+
+// ── Mode Switch ─────────────────────────────────────
+function switchMode(m){
+  if(running)return;
+  mode=m;
+  document.getElementById('ps-view').style.display=m==='ps'?'':'none';
+  document.getElementById('gs-view').style.display=m==='gs'?'':'none';
+  document.getElementById('tab-ps').className='mode-tab'+(m==='ps'?' act-ps':'');
+  document.getElementById('tab-gs').className='mode-tab'+(m==='gs'?' act-gs':'');
+  const ml=document.getElementById('mode-label');
+  const mc=document.getElementById('mode-chip');
+  const md=document.getElementById('mode-desc');
+  if(m==='ps'){
+    ml.textContent='PS MODE'; ml.style.color='var(--accent)';
+    mc.style.borderColor='rgba(0,229,255,0.3)';
+    md.textContent='PS coordinates all workers — single point of control';
+    document.getElementById('btn-start').className='btn pps';
+    document.getElementById('lbl-exch').textContent='GRADIENTS SENT';
+    document.getElementById('lbl-extra').textContent='SPEEDUP vs SINGLE';
+    document.getElementById('m-extra').style.color='var(--accent)';
+    document.getElementById('chart-lbl').textContent='// PS LOSS CURVE';
+  } else {
+    ml.textContent='GOSSIP MODE'; ml.style.color='var(--gossip)';
+    mc.style.borderColor='rgba(167,139,250,0.3)';
+    md.textContent='Decentralized — workers exchange weights directly, no PS needed';
+    document.getElementById('btn-start').className='btn pgs';
+    document.getElementById('lbl-exch').textContent='GOSSIP EXCHANGES';
+    document.getElementById('lbl-extra').textContent='FAULT TOLERANCE';
+    document.getElementById('m-extra').style.color='var(--green)';
+    document.getElementById('chart-lbl').textContent='// GOSSIP LOSS CURVE';
+  }
+  resetSim(); setTimeout(drawLines,150);
+}
+
+// ── Lines ───────────────────────────────────────────
+function npos(id){
+  const w=document.getElementById('canvas-wrap');
+  const n=document.getElementById(id);
+  if(!n||n.offsetParent===null)return null;
+  const wr=w.getBoundingClientRect(),nr=n.getBoundingClientRect();
+  return{x:nr.left-wr.left+nr.width/2,y:nr.top-wr.top+nr.height/2};
+}
+function drawLines(){
+  const g=document.getElementById('svg-lines'); g.innerHTML='';
+  const pairs=mode==='ps'
+    ?[['node-cloud','node-master'],['node-master','node-w0'],['node-master','node-w1'],['node-w0','node-ps'],['node-w1','node-ps']]
+    :[['gnode-w0','gnode-w1'],['gnode-w1','gnode-w2'],['gnode-w2','gnode-w0']];
+  const cls=mode==='ps'?'conn-line':'conn-gline';
+  pairs.forEach(([a,b])=>{
+    const pa=npos(a),pb=npos(b); if(!pa||!pb)return;
+    const l=document.createElementNS('http://www.w3.org/2000/svg','line');
+    l.setAttribute('x1',pa.x);l.setAttribute('y1',pa.y);
+    l.setAttribute('x2',pb.x);l.setAttribute('y2',pb.y);
+    l.setAttribute('class',cls); g.appendChild(l);
+  });
+}
+window.addEventListener('resize',()=>setTimeout(drawLines,100));
+
+// ── Packets ─────────────────────────────────────────
+function pkt(from,to,type,delay=0){
+  setTimeout(()=>{
+    const wrap=document.getElementById('canvas-wrap');
+    const f=npos(from),t=npos(to); if(!f||!t)return;
+    const p=document.createElement('div');
+    p.className='packet '+type; p.style.left=f.x+'px'; p.style.top=f.y+'px';
+    wrap.appendChild(p);
+    const dur=520,s=performance.now();
+    function anim(now){
+      const tt=Math.min((now-s)/dur,1);
+      const e=tt<0.5?2*tt*tt:-1+(4-2*tt)*tt;
+      p.style.left=(f.x+(t.x-f.x)*e)+'px'; p.style.top=(f.y+(t.y-f.y)*e)+'px';
+      tt<1?requestAnimationFrame(anim):p.remove();
+    }
+    requestAnimationFrame(anim);
+  },delay);
+}
+
+// ── Log ─────────────────────────────────────────────
+let lt=0;
+function log(src,msg,val=''){
+  const b=document.getElementById('log-body');
+  const t=String(lt++).padStart(4,'0');
+  const sc={master:'sm',ps:'sp',w0:'s0',w1:'s1',w2:'s2',gossip:'sg'}[src]||'sm';
+  const lb={master:'[MASTER]',ps:'[PS    ]',w0:'[WORK-0]',w1:'[WORK-1]',w2:'[WORK-2]',gossip:'[GOSSIP]'}[src]||'[SYS]';
+  const vh=val?` <span class="val">${val}</span>`:'';
+  const d=document.createElement('div');
+  d.className='log-line';
+  d.innerHTML=`<span class="ts">${t} </span><span class="${sc}">${lb}</span> <span class="msg">${msg}</span>${vh}`;
+  b.appendChild(d); b.scrollTop=b.scrollHeight;
+}
+function clearLog(){document.getElementById('log-body').innerHTML='';lt=0;}
+
+// ── Node helpers ─────────────────────────────────────
+function act(id,cls='active-node'){const n=document.getElementById(id);if(n){cls.split(' ').forEach(c=>c&&n.classList.add(c));}}
+function deact(id){const n=document.getElementById(id);if(n){n.classList.remove('active-node','gact','worker-node-active');}}
+function tag(id,t){const e=document.getElementById(id);if(e)e.textContent=t;}
+function prog(id,p){const e=document.getElementById(id);if(e)e.style.width=p+'%';}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+// ── Charts ───────────────────────────────────────────
+function drawLoss(hist,color){
+  const w=lc.offsetWidth,h=80; lc.width=w;lc.height=h;
+  lx.clearRect(0,0,w,h); if(hist.length<2)return;
+  const mx=Math.max(...hist)*1.1,mn=Math.min(...hist)*0.9;
+  const sx=w/(EPOCHS-1),sy=h/(mx-mn);
+  lx.strokeStyle='rgba(255,255,255,0.04)';lx.lineWidth=1;
+  for(let i=0;i<=4;i++){const y=i*(h/4);lx.beginPath();lx.moveTo(0,y);lx.lineTo(w,y);lx.stroke();}
+  const grd=lx.createLinearGradient(0,0,0,h);
+  grd.addColorStop(0,color.replace('1)','0.25)'));grd.addColorStop(1,color.replace('1)','0.02)'));
+  lx.beginPath();
+  hist.forEach((v,i)=>{const x=i*sx,y=h-(v-mn)*sy;i?lx.lineTo(x,y):lx.moveTo(x,y);});
+  lx.lineTo((hist.length-1)*sx,h);lx.lineTo(0,h);lx.closePath();
+  lx.fillStyle=grd;lx.fill();
+  lx.beginPath();
+  hist.forEach((v,i)=>{const x=i*sx,y=h-(v-mn)*sy;i?lx.lineTo(x,y):lx.moveTo(x,y);});
+  lx.strokeStyle=color.replace('rgba','rgb').replace(',1)',')')||color;lx.lineWidth=2;lx.stroke();
+}
+function drawCmp(){
+  if(!psResult||!gsResult)return;
+  document.getElementById('cmp-chart-wrap').style.display='';
+  const w=cc.offsetWidth,h=70; cc.width=w;cc.height=h;
+  cx.clearRect(0,0,w,h);
+  const all=[...lossHist,...gsLossHist];
+  const mx=Math.max(...all)*1.1,mn=Math.min(...all)*0.9;
+  const sx=w/(EPOCHS-1),sy=h/(mx-mn);
+  [[lossHist,'rgba(0,229,255,1)',false],[gsLossHist,'rgba(167,139,250,1)',true]].forEach(([arr,col,dash])=>{
+    cx.beginPath();
+    arr.forEach((v,i)=>{const x=i*sx,y=h-(v-mn)*sy;i?cx.lineTo(x,y):cx.moveTo(x,y);});
+    cx.strokeStyle=col;cx.lineWidth=2;
+    dash?cx.setLineDash([4,3]):cx.setLineDash([]);
+    cx.stroke();
+  });
+  cx.setLineDash([]);
+  cx.font='9px JetBrains Mono';
+  cx.fillStyle='rgba(0,229,255,1)';cx.fillText('PS',4,10);
+  cx.fillStyle='rgba(167,139,250,1)';cx.fillText('GOSSIP',22,10);
+}
+
+// ── Metrics update ───────────────────────────────────
+function updMetrics(loss,hist){
+  const rmse=Math.max(0.38,(loss*0.55)).toFixed(3);
+  tag('m-epoch',`${epoch} / ${EPOCHS}`);
+  tag('m-rmse',epoch>0?rmse:'—');
+  tag('m-loss',epoch>0?loss.toFixed(4):'—');
+  tag('m-exch',mode==='ps'?gradCount:gossipCount);
+  tag('m-extra',epoch>0?(mode==='ps'?'1.82×':'✓ Active'):'—');
+  const ln=Math.min(100,(loss/2.8)*100);
+  const rn=Math.min(100,parseFloat(rmse)/0.8*100);
+  document.getElementById('loss-bar').style.width=ln+'%';
+  document.getElementById('rmse-bar').style.width=(100-rn)+'%';
+  tag('hdr-epoch',epoch);
+  drawLoss(hist, mode==='ps'?'rgba(0,229,255,1)':'rgba(167,139,250,1)');
+}
+
+// ── PS Epoch ─────────────────────────────────────────
+async function psEpoch(ep){
+  const spd=parseInt(document.getElementById('speed-sel').value);
+  const S=ms=>sleep(ms*(spd/700));
+
+  tag('master-tag','SPLITTING');act('node-master');prog('master-prog',(ep/EPOCHS)*100);
+  log('master',`Epoch ${ep}/${EPOCHS} — splitting dataset`);
+  await S(280);
+
+  pkt('node-master','node-w0','data');pkt('node-master','node-w1','data',140);
+  tag('master-tag','DISPATCHING');
+  log('master','Shards dispatched → Worker 0,1','shard_0, shard_1');
+  await S(550);
+
+  act('node-w0','active-node');act('node-w1','active-node');
+  tag('w0-tag','TRAINING');tag('w1-tag','TRAINING');
+  for(let b=0;b<5;b++){
+    if(!running)return;
+    w0L=Math.max(0.28,w0L-(0.09+Math.random()*0.04));
+    w1L=Math.max(0.28,w1L-(0.08+Math.random()*0.04));
+    tag('w0-loss',`loss: ${w0L.toFixed(4)}`);tag('w1-loss',`loss: ${w1L.toFixed(4)}`);
+    prog('w0-prog',((b+1)/5)*100);prog('w1-prog',((b+1)/5)*100);
+    await S(220);
+  }
+  log('w0',`Gradients computed`,`loss=${w0L.toFixed(4)}`);
+  log('w1',`Gradients computed`,`loss=${w1L.toFixed(4)}`);
+
+  act('node-ps','active-node');tag('ps-tag','RECEIVING');
+  tag('w0-tag','PUSHING');tag('w1-tag','PUSHING');
+  pkt('node-w0','node-ps','grad');pkt('node-w1','node-ps','grad',160);
+  gradCount+=2; log('w0','Gradients → PS');log('w1','Gradients → PS');
+  await S(480);
+
+  tag('ps-tag','AGGREGATING');tag('ps-rounds',`rounds: ${ep}`);
+  gL=(w0L+w1L)/2;
+  log('ps',`Avg gradients from 2 workers`,`round=${ep}`);
+  log('ps',`Weights updated`,`loss=${gL.toFixed(4)}`);
+  await S(320);
+
+  tag('ps-tag','BROADCASTING');
+  pkt('node-ps','node-w0','weight');pkt('node-ps','node-w1','weight',130);
+  log('ps','Updated weights → Workers');
+  await S(480);
+
+  deact('node-w0');deact('node-w1');deact('node-ps');
+  tag('w0-tag',ep===EPOCHS?'DONE':'READY');tag('w1-tag',ep===EPOCHS?'DONE':'READY');
+  tag('ps-tag','STANDBY');
+  lossHist.push(gL); updMetrics(gL,lossHist);
+}
+
+// ── Gossip Epoch ─────────────────────────────────────
+async function gsEpoch(ep){
+  const spd=parseInt(document.getElementById('speed-sel').value);
+  const S=ms=>sleep(ms*(spd/700));
+
+  ['gnode-w0','gnode-w1','gnode-w2'].forEach(id=>act(id,'gact'));
+  tag('gw0-tag','TRAINING');tag('gw1-tag','TRAINING');tag('gw2-tag','TRAINING');
+  log('gossip',`Epoch ${ep}/${EPOCHS} — all workers training locally (no PS!)`);
+
+  for(let b=0;b<4;b++){
+    if(!running)return;
+    gw0L=Math.max(0.34,gw0L-(0.075+Math.random()*0.04));
+    gw1L=Math.max(0.34,gw1L-(0.07+Math.random()*0.04));
+    gw2L=Math.max(0.34,gw2L-(0.072+Math.random()*0.04));
+    tag('gw0-loss',`loss: ${gw0L.toFixed(4)}`);
+    tag('gw1-loss',`loss: ${gw1L.toFixed(4)}`);
+    tag('gw2-loss',`loss: ${gw2L.toFixed(4)}`);
+    prog('gw0-prog',((b+1)/4)*100);prog('gw1-prog',((b+1)/4)*100);prog('gw2-prog',((b+1)/4)*100);
+    await S(200);
+  }
+
+  // Gossip exchanges — peer to peer
+  log('gossip','Gossip exchange round — sharing model weights with peers');
+  tag('gw0-tag','GOSSIPING');tag('gw1-tag','GOSSIPING');tag('gw2-tag','GOSSIPING');
+  const pairs=[['gnode-w0','gnode-w1'],['gnode-w1','gnode-w2'],['gnode-w2','gnode-w0']];
+  for(const [a,b] of pairs){
+    if(!running)return;
+    pkt(a,b,'gp'); pkt(b,a,'gp',180);
+    gossipCount+=2; await S(320);
+  }
+
+  // Average weights (gossip convergence)
+  const avg=(gw0L+gw1L+gw2L)/3;
+  gw0L=avg+(Math.random()-0.5)*0.018;
+  gw1L=avg+(Math.random()-0.5)*0.018;
+  gw2L=avg+(Math.random()-0.5)*0.018;
+  ggL=avg;
+  tag('gw0-loss',`loss: ${gw0L.toFixed(4)}`);
+  tag('gw1-loss',`loss: ${gw1L.toFixed(4)}`);
+  tag('gw2-loss',`loss: ${gw2L.toFixed(4)}`);
+
+  const gc=ep*3;
+  tag('gw0-gc',`gossips: ${gc}`);tag('gw1-gc',`gossips: ${gc}`);tag('gw2-gc',`gossips: ${gc}`);
+  log('gossip',`Weights converged via gossip`,`loss=${ggL.toFixed(4)}`);
+  log('w0','Gossip ↔ W1 complete');log('w1','Gossip ↔ W2 complete');log('w2','Gossip ↔ W0 complete');
+
+  await S(260);
+  ['gnode-w0','gnode-w1','gnode-w2'].forEach(id=>deact(id));
+  tag('gw0-tag',ep===EPOCHS?'DONE':'READY');tag('gw1-tag',ep===EPOCHS?'DONE':'READY');tag('gw2-tag',ep===EPOCHS?'DONE':'READY');
+  gsLossHist.push(ggL); updMetrics(ggL,gsLossHist);
+}
+
+// ── Main ─────────────────────────────────────────────
+async function startSim(){
+  if(running)return;
+  running=true;t0=Date.now();
+  document.getElementById('btn-start').disabled=true;
+  document.getElementById('btn-stop').disabled=false;
+  const dot=document.getElementById('sys-dot');
+  dot.classList.add(mode==='ps'?'live':'glive');
+  tag('sys-status','RUNNING');
+
+  if(mode==='ps'){
+    log('master','PS System boot — initializing components');
+    act('node-cloud'); await sleep(280);
+    log('master','Cloud storage connected','✓');
+    act('node-ps','active-node');tag('ps-tag','ONLINE');
+    log('ps','Parameter Server online',':50051');
+    await sleep(280); deact('node-cloud');deact('node-ps');
+    log('master',`Starting distributed training (PS)`,`${EPOCHS} epochs`);
+    for(epoch=1;epoch<=EPOCHS;epoch++){if(!running)break; await psEpoch(epoch); await sleep(70);}
+    if(running){
+      const el=((Date.now()-t0)/1000).toFixed(1);
+      psResult={rmse:(gL*0.55).toFixed(4),time:el+'s'};
+      tag('cmp-ps-r',psResult.rmse);tag('cmp-ps-t',psResult.time);
+      log('master','PS Training complete!','✓');
+      log('master','Final RMSE',psResult.rmse);log('master','Time',psResult.time);
+    }
+  } else {
+    log('gossip','Gossip System boot — NO central server!');
+    ['gnode-w0','gnode-w1','gnode-w2'].forEach(id=>act(id,'gact'));
+    await sleep(280);
+    log('gossip','Workers listening on ports 60000, 60001, 60002','✓');
+    log('gossip','Peer mesh formed — W0↔W1↔W2↔W0');
+    await sleep(300);
+    ['gnode-w0','gnode-w1','gnode-w2'].forEach(id=>deact(id));
+    log('gossip',`Starting decentralized training`,`${EPOCHS} epochs, 3 workers`);
+    for(epoch=1;epoch<=EPOCHS;epoch++){if(!running)break; await gsEpoch(epoch); await sleep(70);}
+    if(running){
+      const el=((Date.now()-t0)/1000).toFixed(1);
+      gsResult={rmse:(ggL*0.55).toFixed(4),time:el+'s'};
+      tag('cmp-gs-r',gsResult.rmse);tag('cmp-gs-t',gsResult.time);
+      log('gossip','Gossip Training complete!','✓');
+      log('gossip','Final RMSE',gsResult.rmse);log('gossip','Total exchanges',String(gossipCount));
+    }
+  }
+
+  if(running){
+    running=false;
+    tag('sys-status','COMPLETE');
+    document.getElementById('btn-start').disabled=false;
+    document.getElementById('btn-stop').disabled=true;
+    dot.classList.remove('live','glive');
+    if(psResult&&gsResult){
+      const pw=parseFloat(psResult.rmse),gw=parseFloat(gsResult.rmse);
+      const win=pw<gw?'⚡ PS (better accuracy)':'🔗 GOSSIP (better fault tol.)';
+      const wc=pw<gw?'var(--accent)':'var(--gossip)';
+      const we=document.getElementById('cmp-win');
+      we.textContent=win;we.style.color=wc;
+      document.getElementById('cmp-bar').classList.add('show');
+      drawCmp();
+    }
+  }
+}
+
+function stopSim(){
+  running=false;tag('sys-status','STOPPED');
+  document.getElementById('btn-start').disabled=false;
+  document.getElementById('btn-stop').disabled=true;
+  log('master','Simulation stopped');
+}
+
+function resetSim(){
+  stopSim();
+  epoch=0;gradCount=0;gossipCount=0;
+  w0L=2.8;w1L=2.8;gL=2.8;
+  gw0L=2.8;gw1L=2.8;gw2L=2.8;ggL=2.8;
+  lossHist=[];gsLossHist=[];
+  ['node-cloud','node-master','node-w0','node-w1','node-ps'].forEach(deact);
+  tag('master-tag','IDLE');tag('w0-tag','WAITING');tag('w1-tag','WAITING');tag('ps-tag','OFFLINE');tag('ps-rounds','rounds: 0');
+  tag('w0-loss','loss: —');tag('w1-loss','loss: —');
+  ['master-prog','w0-prog','w1-prog'].forEach(id=>prog(id,0));
+  ['gnode-w0','gnode-w1','gnode-w2'].forEach(id=>deact(id));
+  tag('gw0-tag','IDLE');tag('gw1-tag','IDLE');tag('gw2-tag','IDLE');
+  ['gw0-loss','gw1-loss','gw2-loss'].forEach(id=>tag(id,'loss: —'));
+  ['gw0-gc','gw1-gc','gw2-gc'].forEach(id=>tag(id,'gossips: 0'));
+  ['gw0-prog','gw1-prog','gw2-prog'].forEach(id=>prog(id,0));
+  ['m-epoch','m-rmse','m-loss','m-extra'].forEach(id=>tag(id,'—'));
+  tag('m-epoch','0 / 20');tag('m-exch','0');tag('hdr-epoch','0');tag('sys-status','IDLE');
+  document.getElementById('sys-dot').classList.remove('live','glive');
+  document.getElementById('btn-start').disabled=false;
+  document.getElementById('btn-stop').disabled=true;
+  document.getElementById('cmp-bar').classList.remove('show');
+  document.getElementById('cmp-chart-wrap').style.display='none';
+  lx.clearRect(0,0,lc.width,lc.height);cx.clearRect(0,0,cc.width,cc.height);
+  clearLog();
+  log('master',`System ready — Mode: ${mode.toUpperCase()}. Press RUN to begin.`);
+}
+
+// Init
+switchMode('ps');
+setTimeout(()=>{drawLines();resetSim();},400);
+</script>
+</body>
+</html>
